@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# TPC-H: generated data, dbgen binary, run output
+tpch/data_sf*/
+tpch/tpch-dbgen/
+tpch/results.csv
+tpch/results.json
+tpch/.output_staging/
+
+# ClickBench: large dataset and run output
+clickbench/hits.tsv
+clickbench/results.csv
+clickbench/results.json
+clickbench/.output_staging/
