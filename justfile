@@ -11,12 +11,20 @@ pg_version := env_var_or_default("PG_VERSION", "pg18")
 help:
     @just --list --unsorted
 
+# ── Common ────────────────────────────────────────────────────────────────────
+
+# Apply PostgreSQL performance tuning (parallelism, memory, JIT). Shared by all benchmarks.
+[group('common')]
+pg-tune pg=pg_version:
+    bash tune_postgres.sh {{pg}}
+
 # ── ClickBench ────────────────────────────────────────────────────────────────
 
 # First-time setup: download hits dataset and load into PostgreSQL
 [group('clickbench')]
 clickbench-setup pg=pg_version:
     cd clickbench && bash setup.sh {{pg}}
+
 
 # Run 43-query comparison (pgfusion vs PostgreSQL)
 # Usage: just clickbench [pg_version] [runs] [query=N]

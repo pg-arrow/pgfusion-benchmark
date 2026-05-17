@@ -5,12 +5,13 @@ set -euo pipefail
 # Runs all 43 queries against both engines, captures timing, and produces a comparison.
 #
 # Usage:
-#   ./run.sh [pg_version] [runs] [--checkpoint] [--checkpoint-only] [--label=<text>] [--query=N]
+#   ./run.sh [pg_version] [runs] [--checkpoint] [--checkpoint-only] [--label=<text>] [--query=N] [--timeout=<sec>]
 #
 #   --checkpoint         After a full run, save results to checkpoints/<short-hash>[-label]/
 #   --checkpoint-only    Skip the benchmark run; just archive current results to checkpoints/<short-hash>[-label]/
 #   --label=<text>       Tag appended to the checkpoint folder name (e.g. --label=before-optimization)
 #   --query=N            Run only query N (1-based); skips all others
+#   --timeout=<sec>      Per-query timeout in seconds (default 300). Use 0 to disable.
 #
 # Results are always written to checkpoints/current/ during the run.
 
@@ -24,6 +25,7 @@ CHECKPOINT_ONLY=false
 CHECKPOINT_LABEL=""
 QUERY_FILTER=""
 QUERY_SKIP=""
+QUERY_TIMEOUT=300
 
 for arg in "$@"; do
   case "$arg" in
@@ -35,6 +37,7 @@ for arg in "$@"; do
   --label=*) CHECKPOINT_LABEL="${arg#--label=}" ;;
   --query=*) QUERY_FILTER="${arg#--query=}" ;;
   --skip=*)  QUERY_SKIP="${arg#--skip=}" ;;
+  --timeout=*) QUERY_TIMEOUT="${arg#--timeout=}" ;;
   --*)
     echo "Unknown flag: $arg" >&2
     exit 1

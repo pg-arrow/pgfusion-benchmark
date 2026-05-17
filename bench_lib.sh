@@ -14,6 +14,7 @@
 #   CHECKPOINT_LABEL        optional label string
 #   QUERY_FILTER            optional query number to run (skip all others)
 #   QUERY_SKIP              space-separated query numbers to skip (e.g. "17" or "16 17")
+#   QUERY_TIMEOUT           per-query timeout in seconds (0 = disabled; default 300)
 #
 #   BENCH_DB                database name (e.g. "tpch" or "clickbench")
 #   BENCH_TITLE             display title for the summary (e.g. "TPC-H Results Summary")
@@ -31,7 +32,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 log_info() { echo -e "${YELLOW}[INFO]${NC} $*"; }
-log_ok()   { echo -e "${GREEN}[OK]${NC} $*"; }
+log_ok() { echo -e "${GREEN}[OK]${NC} $*"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 
 # ── Validate config file ─────────────────────────────────────────────────────
@@ -84,10 +85,10 @@ CURRENT_DIR="$SCRIPT_DIR/checkpoints/current"
 save_to_dir() {
   local dest="$1"
   mkdir -p "$dest"
-  [ -f "$SCRIPT_DIR/results.csv" ]  && cp "$SCRIPT_DIR/results.csv"  "$dest/results.csv"
+  [ -f "$SCRIPT_DIR/results.csv" ] && cp "$SCRIPT_DIR/results.csv" "$dest/results.csv"
   [ -f "$SCRIPT_DIR/results.json" ] && cp "$SCRIPT_DIR/results.json" "$dest/results.json"
   [ -f "$SCRIPT_DIR/heatmap.html" ] && cp "$SCRIPT_DIR/heatmap.html" "$dest/heatmap.html"
-  [ -f "$SCRIPT_DIR/queries.sql" ]  && cp "$SCRIPT_DIR/queries.sql"  "$dest/queries.sql"
+  [ -f "$SCRIPT_DIR/queries.sql" ] && cp "$SCRIPT_DIR/queries.sql" "$dest/queries.sql"
 }
 
 # ── Checkpoint-only mode: archive existing results and exit ──────────────────
@@ -148,9 +149,36 @@ if [ "${BENCH_TUNE_WARN:-false}" = "true" ]; then
   fi
 fi
 
+# ── Query timeout ────────────────────────────────────────────────────────────
+
+QUERY_TIMEOUT="${QUERY_TIMEOUT:-300}"
+if ! [[ "$QUERY_TIMEOUT" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: QUERY_TIMEOUT must be a non-negative integer (got: $QUERY_TIMEOUT)" >&2
+  exit 1
+fi
+
+TIMEOUT_BIN=""
+if [ "$QUERY_TIMEOUT" -gt 0 ]; then
+  if command -v timeout &>/dev/null; then
+    TIMEOUT_BIN="$(command -v timeout)"
+  elif command -v gtimeout &>/dev/null; then
+    TIMEOUT_BIN="$(command -v gtimeout)"
+  else
+    log_warn "No 'timeout' binary found (install coreutils); pgfusion timeout disabled"
+  fi
+fi
+
+# statement_timeout is set in ms; 0 means disabled
+PG_STATEMENT_TIMEOUT_MS=$((QUERY_TIMEOUT * 1000))
+
 log_info "Database OID: $DB_OID"
 log_info "Data dir: $DATA_DIR"
 log_info "Runs per query: $RUNS (reporting best)"
+if [ "$QUERY_TIMEOUT" -gt 0 ]; then
+  log_info "Query timeout: ${QUERY_TIMEOUT}s"
+else
+  log_info "Query timeout: disabled"
+fi
 log_info "PG parallel workers: $PG_PARALLEL | shared_buffers: $PG_SHARED"
 [ -n "$GIT_SHORT" ] && log_info "Commit: $GIT_SHORT ($GIT_COMMIT)${CHECKPOINT_LABEL:+ label=$CHECKPOINT_LABEL}"
 
@@ -224,11 +252,11 @@ PBAR_WIDTH=30
 
 print_progress() {
   local done="$1" total="$2" label="$3"
-  local filled=$(( done * PBAR_WIDTH / total ))
-  local empty=$(( PBAR_WIDTH - filled ))
+  local filled=$((done * PBAR_WIDTH / total))
+  local empty=$((PBAR_WIDTH - filled))
   local bar="" i
-  for (( i=0; i<filled; i++ )); do bar="${bar}#"; done
-  for (( i=0; i<empty;  i++ )); do bar="${bar}-"; done
+  for ((i = 0; i < filled; i++)); do bar="${bar}#"; done
+  for ((i = 0; i < empty; i++)); do bar="${bar}-"; done
   printf "\r${CYAN}[%s]${NC} %d/%d  %-38s" "$bar" "$done" "$total" "$label" >&2
 }
 
@@ -241,10 +269,15 @@ clear_progress() {
 run_pg_query() {
   local query="$1"
   local output
+  local timeout_stmt=""
+  if [ "$QUERY_TIMEOUT" -gt 0 ]; then
+    timeout_stmt="SET statement_timeout = ${PG_STATEMENT_TIMEOUT_MS};"
+  fi
   output=$(
     "$PSQL" -d "$BENCH_DB" 2>&1 <<EOF
 \o /dev/null
 \timing on
+$timeout_stmt
 $query
 EOF
   ) || true
@@ -255,8 +288,18 @@ EOF
 
 run_pgfusion_query() {
   local query="$1"
-  local output
-  output=$("$PG_FUSION" -d "$DATA_DIR" --db-id "$DB_OID" -c "$query" -t 2>&1) || true
+  local output rc
+  if [ -n "$TIMEOUT_BIN" ]; then
+    output=$("$TIMEOUT_BIN" --foreground "${QUERY_TIMEOUT}s" "$PG_FUSION" -d "$DATA_DIR" --db-id "$DB_OID" -c "$query" -t 2>&1)
+    rc=$?
+    # GNU/BSD coreutils timeout exits 124 on timeout
+    if [ "$rc" -eq 124 ]; then
+      output="${output}
+Timeout: exceeded ${QUERY_TIMEOUT}s"
+    fi
+  else
+    output=$("$PG_FUSION" -d "$DATA_DIR" --db-id "$DB_OID" -c "$query" -t 2>&1) || true
+  fi
   echo "$output"
 }
 
@@ -267,7 +310,9 @@ run_pgfusion_query() {
 extract_pg_time() {
   set +o pipefail
   local result
-  result=$(echo "$1" | grep -oE 'Time: [0-9.]+ ms' | grep -oE '[0-9.]+' | head -1) || true
+  # The query is always the last statement in the heredoc; SET statement_timeout
+  # also emits a "Time:" line, so take the last one rather than the first.
+  result=$(echo "$1" | grep -oE 'Time: [0-9.]+ ms' | grep -oE '[0-9.]+' | tail -1) || true
   set -o pipefail
   echo "$result"
 }
@@ -288,8 +333,12 @@ echo "query,pgfusion_best_ms,pgfusion_status,postgres_best_ms,postgres_status" >
 printf "${CYAN}${BOLD}%-6s  %14s  %14s  %s${NC}\n" "Query" "pgfusion (ms)" "postgres (ms)" "Status"
 printf "%-6s  %14s  %14s  %s\n" "------" "--------------" "--------------" "----------"
 
-PF_TOTAL=0; PF_PASS=0; PF_FAIL=0
-PG_TOTAL=0; PG_PASS=0; PG_FAIL=0
+PF_TOTAL=0
+PF_PASS=0
+PF_FAIL=0
+PG_TOTAL=0
+PG_PASS=0
+PG_FAIL=0
 JSON_ENTRIES=""
 
 for i in "${!QUERIES[@]}"; do
@@ -320,6 +369,16 @@ for i in "${!QUERIES[@]}"; do
     print_progress "$i" "$NUM_QUERIES" "$qname  pg run $run/$RUNS"
     raw_output=$(run_pg_query "$query")
     ms=$(extract_pg_time "$raw_output")
+    # statement_timeout cancel: psql still prints a "Time:" for the cancelled
+    # statement, so detect the error message explicitly and override.
+    if echo "$raw_output" | grep -q "canceling statement due to statement timeout"; then
+      pg_status="TIMEOUT"
+      set +o pipefail
+      pg_best_output=$(echo "$raw_output" | head -15) || true
+      set -o pipefail
+      pg_best=""
+      break
+    fi
     if [ -z "$ms" ]; then
       pg_status="ERROR"
       set +o pipefail
@@ -351,7 +410,11 @@ EOF2
     raw_output=$(run_pgfusion_query "$query")
     ms=$(extract_pgfusion_time "$raw_output")
     if [ -z "$ms" ]; then
-      pf_status="ERROR"
+      if echo "$raw_output" | grep -q "^Timeout: exceeded"; then
+        pf_status="TIMEOUT"
+      else
+        pf_status="ERROR"
+      fi
       set +o pipefail
       pf_best_output=$(echo "$raw_output" | head -15) || true
       set -o pipefail
@@ -375,7 +438,7 @@ EOF2
   status_display="${pf_status}/${pg_status}"
 
   clear_progress
-  if [ "$pf_status" = "ERROR" ] || [ "$pg_status" = "ERROR" ]; then
+  if [ "$pf_status" != "OK" ] || [ "$pg_status" != "OK" ]; then
     printf "%-6s  %14s  %14s  ${RED}%s${NC}\n" "$qname" "$pf_display" "$pg_display" "$status_display"
   else
     printf "%-6s  %14s  %14s  ${GREEN}%s${NC}\n" "$qname" "$pf_display" "$pg_display" "$status_display"
@@ -394,16 +457,16 @@ EOF2
   # ── Totals ────────────────────────────────────────────────────────────────
   if [ "$pf_status" = "OK" ] && [ -n "$pf_best" ]; then
     PF_TOTAL=$(awk "BEGIN{printf \"%.3f\", $PF_TOTAL + $pf_best}")
-    PF_PASS=$(( PF_PASS + 1 ))
+    PF_PASS=$((PF_PASS + 1))
   else
-    PF_FAIL=$(( PF_FAIL + 1 ))
+    PF_FAIL=$((PF_FAIL + 1))
   fi
 
   if [ "$pg_status" = "OK" ] && [ -n "$pg_best" ]; then
     PG_TOTAL=$(awk "BEGIN{printf \"%.3f\", $PG_TOTAL + $pg_best}")
-    PG_PASS=$(( PG_PASS + 1 ))
+    PG_PASS=$((PG_PASS + 1))
   else
-    PG_FAIL=$(( PG_FAIL + 1 ))
+    PG_FAIL=$((PG_FAIL + 1))
   fi
 done
 
@@ -477,7 +540,7 @@ if [ "$BENCH_RESULTS_IN_ROOT" = "true" ]; then
 else
   # Results already written to $CURRENT_DIR; copy heatmap and queries
   [ -f "$SCRIPT_DIR/heatmap.html" ] && cp "$SCRIPT_DIR/heatmap.html" "$CURRENT_DIR/heatmap.html"
-  [ -f "$SCRIPT_DIR/queries.sql" ]  && cp "$SCRIPT_DIR/queries.sql"  "$CURRENT_DIR/queries.sql"
+  [ -f "$SCRIPT_DIR/queries.sql" ] && cp "$SCRIPT_DIR/queries.sql" "$CURRENT_DIR/queries.sql"
 fi
 
 if [ -d "$OUTPUT_STAGING" ]; then
@@ -532,7 +595,7 @@ for i in "${!QUERIES[@]}"; do
     ratio=$(awk "BEGIN{printf \"%.2f\", $pg_ms / $pf_ms}")
     COMPARISON="${COMPARISON}
 $(printf "  %-6s  %12s  %12s  %8sx" "$qname" "$pf_ms" "$pg_ms" "$ratio")"
-    BOTH_COUNT=$(( BOTH_COUNT + 1 ))
+    BOTH_COUNT=$((BOTH_COUNT + 1))
   fi
 done
 

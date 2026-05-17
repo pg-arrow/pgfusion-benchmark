@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# PostgreSQL performance tuning for ClickBench benchmarking
+# PostgreSQL performance tuning for pgfusion benchmarks (TPC-H, ClickBench, etc.)
 # Configures parallelism, memory, and JIT to match pgfusion's 10-partition setup.
 # Uses ALTER SYSTEM SET (writes to postgresql.auto.conf, reversible with ALTER SYSTEM RESET ALL).
+#
+# Usage: ./tune_postgres.sh [pg_version]
+#   pg_version: key from pg-test-config.toml (default: pg18)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-PG_ARROW_ROOT="$(cd "$PROJECT_ROOT/.." && pwd)/pg_arrow"
-CONFIG_FILE="$PG_ARROW_ROOT/pg-test-config.toml"
+CONFIG_FILE="${PG_ARROW_TEST_CONFIG:?PG_ARROW_TEST_CONFIG is not set}"
 
 PG_VERSION="${1:-pg18}"
 
@@ -58,7 +59,7 @@ if ! "$PG_CTL" -D "$DATA_DIR" status &>/dev/null; then
     "$PG_CTL" -D "$DATA_DIR" -l "$DATA_DIR/logfile" start -w >/dev/null 2>&1
 fi
 
-log_info "Applying performance tuning for ClickBench..."
+log_info "Applying performance tuning..."
 
 # ── Apply settings via ALTER SYSTEM ──────────────────────────────────────────
 
@@ -75,7 +76,7 @@ ALTER SYSTEM SET min_parallel_table_scan_size = 0;
 
 -- Memory: analytical workload tuning (default 128MB shared_buffers is far too low)
 ALTER SYSTEM SET shared_buffers = '8GB';
-ALTER SYSTEM SET work_mem = '256MB';
+ALTER SYSTEM SET work_mem = '4GB';
 ALTER SYSTEM SET effective_cache_size = '24GB';
 ALTER SYSTEM SET maintenance_work_mem = '2GB';
 
@@ -126,15 +127,6 @@ for param in \
     val=$("$PSQL" -t -A -c "SHOW $param;" postgres)
     printf "%-40s  %s\n" "$param" "$val"
 done
-
-# ── Run ANALYZE on clickbench if the database exists ─────────────────────────
-
-if "$PSQL" -lqt | cut -d \| -f 1 | grep -qw "clickbench"; then
-    echo ""
-    log_info "Running ANALYZE on clickbench.hits..."
-    "$PSQL" -d clickbench -c "ANALYZE hits;"
-    log_ok "ANALYZE complete"
-fi
 
 echo ""
 log_ok "PostgreSQL tuning complete. Ready for benchmarking."
