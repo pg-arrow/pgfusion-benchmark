@@ -1,8 +1,8 @@
 Timing is on.
  l_shipmode | high_line_count | low_line_count 
 ------------+-----------------+----------------
- MAIL       |            6202 |           9324
- SHIP       |            6200 |           9262
+ MAIL       |           62071 |          93045
+ SHIP       |           62426 |          93261
 (2 rows)
 
-Time: 187.627 ms
+Time: 2303.714 ms (00:02.304)

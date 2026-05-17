@@ -1,10 +1,10 @@
 Timing is on.
-        supp_nation        |        cust_nation        | l_year |    revenue    
----------------------------+---------------------------+--------+---------------
- FRANCE                    | GERMANY                   |   1995 | 54639732.7336
- FRANCE                    | GERMANY                   |   1996 | 54633083.3076
- GERMANY                   | FRANCE                    |   1995 | 52531746.6697
- GERMANY                   | FRANCE                    |   1996 | 52520549.0224
+        supp_nation        |        cust_nation        | l_year |    revenue     
+---------------------------+---------------------------+--------+----------------
+ FRANCE                    | GERMANY                   |   1995 | 521960141.7003
+ FRANCE                    | GERMANY                   |   1996 | 524796110.3842
+ GERMANY                   | FRANCE                    |   1995 | 542199700.0546
+ GERMANY                   | FRANCE                    |   1996 | 533640926.2614
 (4 rows)
 
-Time: 182.237 ms
+Time: 1559.341 ms (00:01.559)

@@ -1,0 +1,4 @@
+Timing is on.
+Time: 0.095 ms
+ERROR:  canceling statement due to statement timeout
+Time: 300033.785 ms (05:00.034)
