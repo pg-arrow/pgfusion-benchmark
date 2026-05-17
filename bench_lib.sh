@@ -290,7 +290,7 @@ run_pgfusion_query() {
   local query="$1"
   local output rc
   if [ -n "$TIMEOUT_BIN" ]; then
-    output=$("$TIMEOUT_BIN" --foreground "${QUERY_TIMEOUT}s" "$PG_FUSION" -d "$DATA_DIR" --db-id "$DB_OID" -c "$query" -t 2>&1)
+    output=$("$TIMEOUT_BIN" --foreground "${QUERY_TIMEOUT}s" "$PG_FUSION" -D "$DATA_DIR" -d "$BENCH_DB" -c "$query" -t 2>&1)
     rc=$?
     # GNU/BSD coreutils timeout exits 124 on timeout
     if [ "$rc" -eq 124 ]; then
@@ -298,7 +298,7 @@ run_pgfusion_query() {
 Timeout: exceeded ${QUERY_TIMEOUT}s"
     fi
   else
-    output=$("$PG_FUSION" -d "$DATA_DIR" --db-id "$DB_OID" -c "$query" -t 2>&1) || true
+    output=$("$PG_FUSION" -D "$DATA_DIR" -d "$BENCH_DB" -c "$query" -t 2>&1) || true
   fi
   echo "$output"
 }
