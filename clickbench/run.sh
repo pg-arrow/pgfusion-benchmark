@@ -16,7 +16,7 @@ set -euo pipefail
 # Results are always written to checkpoints/current/ during the run.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${PG_ARROW_TEST_CONFIG:?PG_ARROW_TEST_CONFIG is not set}"
+CONFIG_FILE="${PG_ARROW_TEST_CONFIG:-${PG_HARNESS_DIR:?PG_HARNESS_DIR is not set}/pg-test-config.toml}"
 
 PG_VERSION="pg18"
 RUNS=3

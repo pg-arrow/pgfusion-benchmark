@@ -1,7 +1,7 @@
 # pgfusion-benchmark justfile
 # Usage: just <recipe>   (run from pgfusion-benchmark/)
 # Requires: https://github.com/casey/just
-# Requires: PG_ARROW_TEST_CONFIG=/path/to/pg-test-config.toml
+# Requires: PG_HARNESS_DIR=/path/to/pg-test-harness
 
 pg_version := env_var_or_default("PG_VERSION", "pg18")
 

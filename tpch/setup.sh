@@ -10,7 +10,7 @@ set -euo pipefail
 #   scale_factor: TPC-H scale factor (default: 1, i.e. ~1GB)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${PG_ARROW_TEST_CONFIG:?PG_ARROW_TEST_CONFIG is not set}"
+CONFIG_FILE="${PG_ARROW_TEST_CONFIG:-${PG_HARNESS_DIR:?PG_HARNESS_DIR is not set}/pg-test-config.toml}"
 
 PG_VERSION="${1:-pg18}"
 SCALE_FACTOR="${2:-10}" # SF1 = ~1GB, SF10 = ~10GB
@@ -41,8 +41,13 @@ read_toml() {
     ' "$CONFIG_FILE"
 }
 
-BIN_DIR="$(read_toml "postgres.$PG_VERSION" "bin_dir")"
-DATA_DIR="$(read_toml "postgres.$PG_VERSION" "data_dir")"
+resolve_path() {
+  local p="$1"
+  case "$p" in /*) echo "$p" ;; *) echo "$(dirname "$CONFIG_FILE")/$p" ;; esac
+}
+
+BIN_DIR="$(resolve_path "$(read_toml "postgres.$PG_VERSION" "bin_dir")")"
+DATA_DIR="$(resolve_path "$(read_toml "postgres.$PG_VERSION" "data_dir")")"
 
 if [ -z "$BIN_DIR" ] || [ -z "$DATA_DIR" ]; then
   log_err "Could not read bin_dir/data_dir for [postgres.$PG_VERSION] from $CONFIG_FILE"

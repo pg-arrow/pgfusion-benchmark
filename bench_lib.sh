@@ -4,8 +4,8 @@
 # Each run.sh must set these variables before sourcing this file:
 #
 #   SCRIPT_DIR              absolute path to the benchmark directory
-#   CONFIG_FILE             path to pg-test-config.toml (from PG_ARROW_TEST_CONFIG env)
-#   PROJECT_ROOT            optional: pgfusion crate root (for cargo build fallback)
+#   CONFIG_FILE             path to pg-test-config.toml (from PG_HARNESS_DIR or PG_ARROW_TEST_CONFIG env)
+#   PGFUSION_ROOT            pgfusion crate root (preferred: builds from source; falls back to PATH)
 #
 #   PG_VERSION              pg version key (e.g. "pg18")
 #   RUNS                    number of runs per query
@@ -53,8 +53,13 @@ read_toml() {
     ' "$CONFIG_FILE"
 }
 
-BIN_DIR="$(read_toml "postgres.$PG_VERSION" "bin_dir")"
-DATA_DIR="$(read_toml "postgres.$PG_VERSION" "data_dir")"
+resolve_path() {
+  local p="$1"
+  case "$p" in /*) echo "$p" ;; *) echo "$(dirname "$CONFIG_FILE")/$p" ;; esac
+}
+
+BIN_DIR="$(resolve_path "$(read_toml "postgres.$PG_VERSION" "bin_dir")")"
+DATA_DIR="$(resolve_path "$(read_toml "postgres.$PG_VERSION" "data_dir")")"
 PSQL="$BIN_DIR/psql"
 PG_CTL="$BIN_DIR/pg_ctl"
 LIB_DIR="$(cd "$BIN_DIR/../lib" && pwd)"
@@ -65,8 +70,8 @@ export DYLD_LIBRARY_PATH="$LIB_DIR${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 GIT_COMMIT=""
 GIT_SHORT=""
 if command -v git &>/dev/null; then
-  GIT_COMMIT=$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || true)
-  GIT_SHORT=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || true)
+  GIT_COMMIT=$(git -C "$PGFUSION_ROOT" rev-parse HEAD 2>/dev/null || true)
+  GIT_SHORT=$(git -C "$PGFUSION_ROOT" rev-parse --short HEAD 2>/dev/null || true)
 fi
 if [ -z "$GIT_COMMIT" ]; then
   GIT_COMMIT=$(date -u '+%Y%m%d_%H%M%S')
@@ -189,23 +194,23 @@ log_info "Running CHECKPOINT..."
 
 # ── Resolve pgfusion_cli binary ──────────────────────────────────────────────
 
-if command -v pgfusion_cli &>/dev/null; then
-  PG_FUSION="$(command -v pgfusion_cli)"
-  log_ok "Binary: $PG_FUSION (from PATH)"
-elif [ -n "${PROJECT_ROOT:-}" ] && [ -f "$PROJECT_ROOT/Cargo.toml" ]; then
+if [ -n "${PGFUSION_ROOT:-}" ] && [ -f "$PGFUSION_ROOT/Cargo.toml" ]; then
   log_info "Building pgfusion (release)..."
-  cargo build --release --manifest-path "$PROJECT_ROOT/Cargo.toml" 2>&1 | tail -1
-  PG_FUSION="$PROJECT_ROOT/target/release/pgfusion_cli"
+  cargo build --release --manifest-path "$PGFUSION_ROOT/Cargo.toml" 2>&1 | tail -1
+  PG_FUSION="$PGFUSION_ROOT/target/release/pgfusion_cli"
   if [ ! -x "$PG_FUSION" ]; then
-    PG_FUSION="$(cargo metadata --manifest-path "$PROJECT_ROOT/Cargo.toml" --format-version 1 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["target_directory"])')/release/pgfusion_cli"
+    PG_FUSION="$(cargo metadata --manifest-path "$PGFUSION_ROOT/Cargo.toml" --format-version 1 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["target_directory"])')/release/pgfusion_cli"
   fi
   if [ ! -x "$PG_FUSION" ]; then
     echo "ERROR: Could not find pgfusion_cli binary after build" >&2
     exit 1
   fi
   log_ok "Binary: $PG_FUSION"
+elif command -v pgfusion_cli &>/dev/null; then
+  PG_FUSION="$(command -v pgfusion_cli)"
+  log_ok "Binary: $PG_FUSION (from PATH)"
 else
-  echo "ERROR: pgfusion_cli not in PATH. Set PROJECT_ROOT or install pgfusion_cli." >&2
+  echo "ERROR: Set PGFUSION_ROOT to the pgfusion crate root, or install pgfusion_cli in PATH." >&2
   exit 1
 fi
 
